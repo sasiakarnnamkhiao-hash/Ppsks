@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ultimate Skin Builder Pro</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root { --miku: #39C5BB; --dark: #0a0a0a; }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: 'Kanit', sans-serif;
+            background: #000;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-bottom: 50px;
+        }
+
+        /* Responsive Controls */
+        .controls {
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            background: rgba(15, 15, 15, 0.95);
+            backdrop-filter: blur(10px);
+            width: 100%;
+            padding: 15px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        .input-group { display: flex; flex-direction: column; gap: 4px; }
+        label { font-size: 0.7rem; color: var(--miku); font-weight: bold; }
+
+        input {
+            background: #222;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            width: 100%;
+        }
+
+        .btn-group { display: flex; gap: 8px; grid-column: span 1; }
+        .btn {
+            flex: 1;
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            padding: 10px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            transition: 0.2s;
+        }
+        .btn-upload { background: var(--miku); color: #000; }
+        .btn-export { background: #fff; color: #000; }
+
+        /* --- STAGE AREA --- */
+        #collage-stage {
+            width: 100%;
+            overflow-x: auto;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            background: #000;
+        }
+
+        #collage-container {
+            display: grid;
+            grid-gap: var(--gap-y, 0px) var(--gap-x, 0px);
+            background: transparent;
+            padding: 10px;
+            width: fit-content;
+        }
+
+        .skin-item {
+            position: relative;
+            cursor: move;
+            /* บังคับขนาดการ์ดให้เท่ากันเป๊ะหลังโดน Crop */
+            width: var(--card-width, 100px);
+            aspect-ratio: 100 / 140; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: visible; /* ให้แท็กสกินยื่นไปทับภาพอื่นได้ */
+        }
+
+        .skin-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* โชว์สกินครบ ไม่ตัดส่วนใดทิ้ง */
+            pointer-events: none;
+        }
+
+        .remove-btn {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: rgba(255, 0, 0, 0.9);
+            color: #fff;
+            border: none;
+            border-radius: 50%;
+            width: 22px;
+            height: 22px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        #loading {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 9999;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loading">
+        <div style="color: var(--miku); font-size: 1.2rem;">กำลังตัดขอบและจัดสกินให้เท่ากัน...</div>
+        <div id="progress" style="margin-top: 10px; font-size: 0.9rem;"></div>
+    </div>
+
+    <div class="controls">
+        <div class="input-group">
+            <label>รูปต่อแถว</label>
+            <input type="number" id="col-count" value="5" min="1">
+        </div>
+        <div class="input-group">
+            <label>ขนาดรูป (px)</label>
+            <input type="number" id="card-width" value="100">
+        </div>
+        <div class="input-group">
+            <label>ความชิดซ้าย-ขวา (ติดลบคือซ้อน)</label>
+            <input type="number" id="gap-x" value="0">
+        </div>
+        <div class="input-group">
+            <label>ความชิดบน-ล่าง</label>
+            <input type="number" id="gap-y" value="0">
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-upload" onclick="document.getElementById('file-input').click()">เพิ่มรูป</button>
+            <button class="btn btn-export" onclick="exportImage()">เซฟรูป</button>
+        </div>
+        <input type="file" id="file-input" multiple accept="image/*" style="display: none;">
+    </div>
+
+    <div id="collage-stage">
+        <div id="collage-container"></div>
+    </div>
+
+    <script>
+        const container = document.getElementById('collage-container');
+        const loading = document.getElementById('loading');
+        const progress = document.getElementById('progress');
+
+        // ฟังก์ชันสแกนและตัดพื้นที่โปร่งใสทิ้งอัตโนมัติ (Auto-Crop)
+        async function processImage(file) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const data = imageData.data;
+                    let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+
+                    for (let y = 0; y < canvas.height; y++) {
+                        for (let x = 0; x < canvas.width; x++) {
+                            if (data[(y * canvas.width + x) * 4 + 3] > 10) { // หาพิกเซลที่ไม่ใส
+                                minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+                                minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+                            }
+                        }
+                    }
+
+                    if (maxX < minX) { resolve(img.src); return; }
+
+                    const cropCanvas = document.createElement('canvas');
+                    cropCanvas.width = maxX - minX + 1;
+                    cropCanvas.height = maxY - minY + 1;
+                    cropCanvas.getContext('2d').drawImage(img, minX, minY, cropCanvas.width, cropCanvas.height, 0, 0, cropCanvas.width, cropCanvas.height);
+                    
+                    resolve(cropCanvas.toDataURL());
+                    URL.revokeObjectURL(img.src);
+                };
+            });
+        }
+
+        // อัปเดต UI
+        function updateUI() {
+            const cols = document.getElementById('col-count').value;
+            const width = document.getElementById('card-width').value;
+            const gx = document.getElementById('gap-x').value;
+            const gy = document.getElementById('gap-y').value;
+
+            container.style.gridTemplateColumns = `repeat(${cols}, auto)`;
+            container.style.setProperty('--card-width', width + 'px');
+            container.style.setProperty('--gap-x', gx + 'px');
+            container.style.setProperty('--gap-y', gy + 'px');
+        }
+
+        ['col-count', 'card-width', 'gap-x', 'gap-y'].forEach(id => {
+            document.getElementById(id).addEventListener('input', updateUI);
+        });
+
+        document.getElementById('file-input').addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files);
+            if (!files.length) return;
+
+            loading.style.display = 'flex';
+            for (let i = 0; i < files.length; i++) {
+                progress.innerText = `ประมวลผลรูปที่ ${i+1}/${files.length}`;
+                const dataUrl = await processImage(files[i]);
+                const div = document.createElement('div');
+                div.className = 'skin-item';
+                div.innerHTML = `<button class="remove-btn" onclick="this.parentElement.remove()">✕</button><img src="${dataUrl}">`;
+                container.appendChild(div);
+            }
+            loading.style.display = 'none';
+            updateUI();
+        });
+
+        new Sortable(container, { animation: 150 });
+
+        async function exportImage() {
+            if (!container.children.length) return;
+            loading.style.display = 'flex';
+            progress.innerText = "กำลังเซฟรูปภาพคุณภาพสูง...";
+            
+            const removes = document.querySelectorAll('.remove-btn');
+            removes.forEach(b => b.style.opacity = '0');
+
+            try {
+                const canvas = await html2canvas(container, {
+                    scale: 2,
+                    backgroundColor: null,
+                    useCORS: true
+                });
+                const link = document.createElement('a');
+                link.download = `Skins-Final-${Date.now()}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            } catch (e) { alert("เซฟไม่ได้จ้า"); }
+            
+            removes.forEach(b => b.style.opacity = '1');
+            loading.style.display = 'none';
+        }
+
+        updateUI();
+    </script>
+</body>
+</html>
